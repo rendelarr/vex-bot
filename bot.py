@@ -221,7 +221,7 @@ async def chat_con_vex(user_id, mensaje_usuario):
         system_completo += f"\n\nCONTEXTO ACTUAL:\n{contexto_memoria}"
 
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-3-flash-preview",
         system_instruction=system_completo
     )
 
@@ -517,7 +517,7 @@ async def alerta_buenas_noches(app):
 
     # Pedir a Vex que genere el mensaje de cierre
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-3-flash-preview",
         system_instruction=SYSTEM_PROMPT
     )
     response = model.generate_content(resumen)
