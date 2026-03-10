@@ -3,20 +3,20 @@ import json
 import logging
 import requests
 from datetime import datetime
-from anthropic import Anthropic
+import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # --- Configuración ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-YOUR_CHAT_ID = os.environ.get("YOUR_CHAT_ID")  # Tu chat ID de Telegram
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+YOUR_CHAT_ID = os.environ.get("YOUR_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Memoria de conversación (por usuario) ---
 conversation_history = {}
@@ -195,45 +195,47 @@ def construir_contexto_memoria(user_id):
 
     return "\n".join(contexto)
 
-# --- Chat con Claude ---
+# --- Chat con Vex (Gemini) ---
 async def chat_con_vex(user_id, mensaje_usuario):
     if user_id not in conversation_history:
         conversation_history[user_id] = []
-    
+
     # Agregar contexto de dólar si el mensaje lo menciona
     if any(word in mensaje_usuario.lower() for word in ["dólar", "dollar", "tipo de cambio", "cambio"]):
         precio = obtener_dolar()
         if precio:
             mensaje_usuario += f"\n[Info actual: El dólar está en {precio} soles hoy {datetime.now().strftime('%d/%m/%Y')}]"
-    
+
     conversation_history[user_id].append({
         "role": "user",
-        "content": mensaje_usuario
+        "parts": [mensaje_usuario]
     })
-    
+
     # Mantener historial manejable
     if len(conversation_history[user_id]) > 20:
         conversation_history[user_id] = conversation_history[user_id][-20:]
-    
+
     contexto_memoria = construir_contexto_memoria(user_id)
     system_completo = SYSTEM_PROMPT
     if contexto_memoria:
         system_completo += f"\n\nCONTEXTO ACTUAL:\n{contexto_memoria}"
-    
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=system_completo,
-        messages=conversation_history[user_id]
+
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=system_completo
     )
-    
-    respuesta = response.content[0].text
-    
+
+    # Convertir historial al formato de Gemini
+    historial_gemini = conversation_history[user_id][:-1]  # todo menos el último
+    chat = model.start_chat(history=historial_gemini)
+    response = chat.send_message(mensaje_usuario)
+    respuesta = response.text
+
     conversation_history[user_id].append({
-        "role": "assistant",
-        "content": respuesta
+        "role": "model",
+        "parts": [respuesta]
     })
-    
+
     respuesta_limpia = procesar_respuesta(str(user_id), respuesta)
     return respuesta_limpia
 
@@ -514,14 +516,12 @@ async def alerta_buenas_noches(app):
     )
 
     # Pedir a Vex que genere el mensaje de cierre
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=350,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": resumen}]
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=SYSTEM_PROMPT
     )
-
-    mensaje = f"🌙 *Cierre del día*\n\n{response.content[0].text}"
+    response = model.generate_content(resumen)
+    mensaje = f"🌙 *Cierre del día*\n\n{response.text}"
 
     await app.bot.send_message(
         chat_id=YOUR_CHAT_ID,
